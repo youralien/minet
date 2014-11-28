@@ -378,13 +378,15 @@ class MLP(MinetBase, TrainingMixin):
         input_variable = X_sym
         for i, (n_in, n_out) in enumerate(zip(layer_sizes[:-1],
                                               layer_sizes[1:-1])):
+            keep_prob = 0.8 if i == 0 else 0.5
+            if self.dropout:
+                keep_prob = 1.0
             self.layers_.append(HiddenLayer(
                 rng=self.random_state,
-                input_variable=0.5 * input_variable,
+                input_variable=keep_prob * input_variable,
                 n_in=n_in, n_out=n_out,
                 activation=self.activation))
 
-            keep_prob = 0.8 if i == 0 else 0.5
             dropout_input_variable = dropout(self.random_state, input_variable,
                                              keep_prob=keep_prob)
             W, b = self.layers_[-1].params
@@ -396,12 +398,15 @@ class MLP(MinetBase, TrainingMixin):
 
             input_variable = self.layers_[-1].output
 
-        self.layers_.append(Softmax(input_variable=0.5 * input_variable,
+        keep_prob = 0.5
+        if self.dropout:
+            keep_prob = 1.0
+        self.layers_.append(Softmax(input_variable=keep_prob * input_variable,
                                     n_in=layer_sizes[-2],
                                     n_out=layer_sizes[-1]))
 
         dropout_input_variable = dropout(self.random_state, input_variable,
-                                         keep_prob=0.5)
+                                         keep_prob=keep_prob)
         W, b = self.layers_[-1].params
         self.dropout_layers_.append(Softmax(input_variable=dropout_input_variable,
                                     weights=W, biases=b,
@@ -425,10 +430,11 @@ class MLP(MinetBase, TrainingMixin):
         self.cost += self.l2_reg * self.l2_sqr
 
         self.errors = self.layers_[-1].errors
-        self.predict_function = theano.function(
-            inputs=[X_sym], outputs=self.layers_[-1].y_pred)
         self.loss_function = theano.function(
             inputs=[X_sym, y_sym], outputs=self.negative_log_likelihood(y_sym))
+
+        self.predict_function = theano.function(
+            inputs=[X_sym], outputs=self.layers_[-1].y_pred)
 
         if self.learning_alg == "sgd":
             self.fit_function = self.get_sgd_trainer(X_sym, y_sym, self.params,
