@@ -10,12 +10,22 @@ import numpy as np
 import time
 import theano
 import theano.tensor as T
+# Sandbox?
 from theano.tensor.shared_randomstreams import RandomStreams
 from theano.compat.python2x import OrderedDict
 
 
+def dropout(random_state, X, keep_prob=0.5):
+    if keep_prob > 0. and keep_prob < 1.:
+        seed = random_state.randint(2 ** 30)
+        srng = RandomStreams(seed)
+        mask = srng.binomial(n=1, p=keep_prob, size=X.shape,
+                             dtype=theano.config.floatX)
+        return X * mask
+    return X
+
+
 def fast_dropout(random_state, X):
-    """ Multiply activations by N(1,1) """
     seed = random_state.randint(2 ** 30)
     srng = RandomStreams(seed)
     mask = srng.normal(size=X.shape, avg=1., dtype=theano.config.floatX)
@@ -109,12 +119,6 @@ def load_mnist():
 
 
 def load_data(dataset):
-    ''' Loads the dataset
-
-    :type dataset: string
-    :param dataset: the name of the dataset (here MNIST)
-    '''
-
     # Check if dataset is in the data directory.
     data_path = os.path.join(os.path.split(__file__)[0], "data")
     if not os.path.exists(data_path):
@@ -276,13 +280,23 @@ class TrainingMixin(object):
 
 
 class Softmax(MinetBase):
-    def __init__(self, input_variable, n_in, n_out):
-        self.W = theano.shared(value=np.zeros((n_in, n_out),
-                                              dtype=theano.config.floatX),
-                               name='W', borrow=True)
-        self.b = theano.shared(value=np.zeros((n_out,),
-                                              dtype=theano.config.floatX),
-                               name='b', borrow=True)
+    def __init__(self, input_variable, n_in=None, n_out=None, weights=None,
+                 biases=None):
+        if weights is None:
+            assert n_in is not None
+            assert n_out is not None
+            W = theano.shared(value=np.zeros((n_in, n_out),
+                                                dtype=theano.config.floatX),
+                                name='W', borrow=True)
+            b = theano.shared(value=np.zeros((n_out,),
+                                                dtype=theano.config.floatX),
+                                name='b', borrow=True)
+        else:
+            W = weights
+            b = biases
+
+        self.W = W
+        self.b = b
         self.p_y_given_x = T.nnet.softmax(T.dot(input_variable, self.W) + self.b)
         self.y_pred = T.argmax(self.p_y_given_x, axis=1)
         self.params = [self.W, self.b]
@@ -300,9 +314,12 @@ class Softmax(MinetBase):
 
 
 class HiddenLayer(MinetBase):
-    def __init__(self, input_variable, n_in, n_out, rng, activation=T.tanh):
+    def __init__(self, input_variable, rng, n_in=None, n_out=None, weights=None,
+                 biases=None, activation=T.tanh):
         self.input_variable = input_variable
-        if not hasattr(self, "W"):
+        if not weights:
+            assert n_in is not None
+            assert n_out is not None
             W_values = np.asarray(rng.uniform(
                 low=-np.sqrt(6. / (n_in + n_out)),
                 high=np.sqrt(6. / (n_in + n_out)),
@@ -311,10 +328,11 @@ class HiddenLayer(MinetBase):
                 W_values *= 4
 
             W = theano.shared(value=W_values, name='W', borrow=True)
-
-        if not hasattr(self, "b"):
             b_values = np.zeros((n_out,), dtype=theano.config.floatX)
             b = theano.shared(value=b_values, name='b', borrow=True)
+        else:
+            W = weights
+            b = biases
 
         self.W = W
         self.b = b
@@ -358,16 +376,35 @@ class MLP(MinetBase, TrainingMixin):
 
     def _setup_functions(self, X_sym, y_sym, layer_sizes):
         input_variable = X_sym
-        dropout_input_variable = fast_dropout(self.random_state, X_sym)
         for i, (n_in, n_out) in enumerate(zip(layer_sizes[:-1],
                                               layer_sizes[1:-1])):
-            self.layers_.append(HiddenLayer(rng=self.random_state,
-                                            input_variable=input_variable,
-                                            n_in=n_in, n_out=n_out,
-                                            activation=self.activation))
+            self.layers_.append(HiddenLayer(
+                rng=self.random_state,
+                input_variable=0.5 * input_variable,
+                n_in=n_in, n_out=n_out,
+                activation=self.activation))
+
+            keep_prob = 0.8 if i == 0 else 0.5
+            dropout_input_variable = dropout(self.random_state, input_variable,
+                                             keep_prob=keep_prob)
+            W, b = self.layers_[-1].params
+            self.dropout_layers_.append(HiddenLayer(
+                rng=self.random_state,
+                input_variable=dropout_input_variable,
+                weights=W, biases=b,
+                activation=self.activation))
+
             input_variable = self.layers_[-1].output
-        self.layers_.append(Softmax(input_variable=input_variable,
+
+        self.layers_.append(Softmax(input_variable=0.5 * input_variable,
                                     n_in=layer_sizes[-2],
+                                    n_out=layer_sizes[-1]))
+
+        dropout_input_variable = dropout(self.random_state, input_variable,
+                                         keep_prob=0.5)
+        W, b = self.layers_[-1].params
+        self.dropout_layers_.append(Softmax(input_variable=dropout_input_variable,
+                                    weights=W, biases=b,
                                     n_out=layer_sizes[-1]))
 
         self.l1 = 0
@@ -378,8 +415,7 @@ class MLP(MinetBase, TrainingMixin):
         for hl in self.layers_:
             self.l2_sqr += (hl.W ** 2).sum()
 
-        self.negative_log_likelihood = self.layers_[-1].negative_log_likelihood
-        self.errors = self.layers_[-1].errors
+        self.negative_log_likelihood = self.dropout_layers_[-1].negative_log_likelihood
 
         self.params = self.layers_[0].params
         for hl in self.layers_[1:]:
@@ -388,6 +424,7 @@ class MLP(MinetBase, TrainingMixin):
         self.cost += self.l1_reg * self.l1
         self.cost += self.l2_reg * self.l2_sqr
 
+        self.errors = self.layers_[-1].errors
         self.predict_function = theano.function(
             inputs=[X_sym], outputs=self.layers_[-1].y_pred)
         self.loss_function = theano.function(
