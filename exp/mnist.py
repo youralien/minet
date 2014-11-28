@@ -1,4 +1,4 @@
-from mininet import load_mnist, MLP
+from minet import load_mnist, MLP
 
 datasets = load_mnist()
 
