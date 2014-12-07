@@ -51,6 +51,28 @@ ud = OrderedDict()
 ud[W] = W - lr * gW
 ud[W_in] = W_in - lr * gW_in
 ud[W_out] = W_out - lr * gW_out
+
+# h0 should be np.zeros(size)
+# lr should be .01 for now, although this could be different for different updates funcs like rmsprop adagrad
 fn = theano.function([h0, u, t, lr],
                      error,
                      updates=ud)
+
+
+# lets train / test stuff!
+
+trX = np.linspace(-5, 5, 101)
+trY = trX ** 2 + np.random.randn(*trX.shape) * 1.3 # noise for training
+
+# plt.plot(trY, '.')
+# plt.show()
+
+teX = np.linspace(-7, 7, 101)
+teY = teX ** 2 # no noise for testing
+
+tru = trX.reshape(-1, 1)
+trt = trY.reshape(-1, 1)
+teu = teX.reshape(-1, 1)
+tet = teX.reshape(-1, 1)
+
+
