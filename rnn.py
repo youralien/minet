@@ -47,6 +47,22 @@ gW, gW_in, gW_out = TT.grad(error, [W, W_in, W_out])
 # training function, that computes the error and updates the weights using
 # SGD.
 
+def RMSprop(cost, params, lr=0.001, rho=0.9, epsilon=1e-6):
+    """RMSprop is a more intelligent update method.  Written by @newmu TheanoTutorials
+    """
+    grads = T.grad(cost=cost, wrt=params)
+    updates = []
+    for p, g in zip(params, grads):
+        # running average of the magnitude of the gradient
+        acc = theano.shared(p.get_value() * 0.) # accumulator
+        acc_new = rho * acc + (1 - rho) * g ** 2
+        # scale the gradient based on running average (it'll find it faster as it approaches the minimum)
+        gradient_scaling = T.sqrt(acc_new + epsilon)
+        g = g / gradient_scaling
+        updates.append((acc, acc_new))
+        updates.append((p, p - lr * g))
+    return updates
+
 ud = OrderedDict()
 ud[W] = W - lr * gW
 ud[W_in] = W_in - lr * gW_in
