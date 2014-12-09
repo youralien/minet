@@ -64,8 +64,8 @@ fn = theano.function([h0, u, t, lr],
 trX = np.linspace(-5, 5, 101)
 trY = trX ** 2 + np.random.randn(*trX.shape) * 1.3 # noise for training
 
-# plt.plot(trY, '.')
-# plt.show()
+plt.plot(trY, 'r.')
+plt.show()
 
 teX = np.linspace(-7, 7, 101)
 teY = teX ** 2 # no noise for testing
